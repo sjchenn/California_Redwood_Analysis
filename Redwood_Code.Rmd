@@ -1,0 +1,318 @@
+---
+title: "Project1 Redwood Data"
+author: "Sijie Chen(2622192), He Qin(2391210)"
+date: "9/22/2021"
+output: pdf_document
+---
+## Data Collection 
+
+The purpose of the redwood tree study aims to help biologists for better understanding on what they are interested in but hard to observe (Tolle, 2005). The study collects data from redwood trees in an advanced way. Conventionally, biologists will attach a winch near the top of the tree and install the monitors on the vertical transect which is connected back to the data logger at the base. The study used the wireless sensor network ‘macroscope’ to collect data from temporal and spatial monitoring for detailed data that will be hard to collect using typical ways. The data is collected around 70-meter tall redwood trees. The collection period lasts for 44 days, and the maximum possible data points are close to 1.7 million. As the conclusion of the study, the sensor networks will be helpful for making progress in biological studies by enabling both temporal and spatial monitoring. The 1.7 million data points, although many of them are collected under abnormal states thus have to be removed, successfully capture information around redwood trees. During the analysis of the dataset, the research team confirms multi-dimensional analysis is very helpful for dealing with those kinds of datasets. Under detailed analysis, the study reveals that “when a directional phenomenon appears, even tiny position differences for the sensor will result in very different data”. In addition, the unnoticeable low battery voltage for sensors provides a warning for future similar studies that long-term sensor network deployment should involve a monitoring that can provide real-time information.  
+
+The sensors installed are deployed in a careful way: (1) The team will sample all sensors once every five minutes in an early summer month; (2) The sensors are placed from 15m to 70m from ground level with 2m space in-between; (3) The team place all sensors on the west side of the tree; (4) Nodes are placed 0.1-1.0 meters from the trunk. The data recording starts on Tuesday, April 27th 2004 at 5:10 p.m. and ends on Thursday, June 10th 2004 at 2:00 p.m. The research team is interested in variables that serve for traditional biological needs, which includes: temperature, humidity, and light levels. The collected dataset contains related variables: result_time, epoch, nodeid, parent, voltage, depth,humidity, humid_temp, hamatop, hamabot. Hamatop stores the inflected PAR, and hamabot stores the reflected PAR. Parent variable indicates which nodes are internally connected. We can identify a unique node by its nodeid and epoch. 
+
+The sensors successfully collect 820,700 meaningful data points, which is roughly 49% of maximized possible data points for this study. Dataset file named “sonoma-data-net” stores data from the network sensors, while data collected by the data logger are stored in the file “sonoma-data-log”. Loggers work as a backup plan for network failure and also serve as a network performance surveillance. The data logger will stop reading when the 521kb flash chip becomes full. Both of the methods  have their own weakness and lose some data along the collection process.
+
+## Load required packages
+We start our data cleaning with checking consistency between variables. 
+We found out that the voltage unit between net dataset and log dataset are different from each other. We will need to convert the voltage unit in the net dataset. From the Crossbow Technology user’s manual, we find out the correct conversion for the unit, which is 0.6*1024/voltage in log dataset (Crossbow Technology, Inc, 2004). After the conversion, the five number summary for all sonoma dataset seems to be in a reasonable range with mean approximately 2.58.
+
+In addition to voltage, we found out that the log dataset has wrong result time. We matched the time with the “sonoma_dates” file by epoch. 
+
+Furthermore, hamatop and hamabot are measurements taken by two Hamamatsu S1087 photodiodes and values represent incident levels of PAR and reflected levels of PAR. We identified the unit for recorded value in both of the variables as LUX, thus we divided values by 54 to obtain PPFD units (Apogee Instruments, Inc, n.d.). 
+
+The data yield in both log and net data performed overall well. We have 12522 rows of missing data after selecting unique rows from the merged dataset . From 2004-04-30 to 2004-05-29, we all have nodes that lost data .We detect Nodeid: 15,122 and 128 lost data along  result times for the . In addition, we also detect that nodes with lower voltage or unusually high voltage produce tend to lose data, there are 1361 rows of missing values when voltage equals 0.58. We removed all rows that have a voltage measure lower than 2.4 or higher than 3.0.  After removing all missing values from the dataset, we incorporate the information of highet of the node, direction, distance and placed position on the tree by matching the nodeid. This additional information allows us to perform analysis from different dimensions.  Our new dataset has fifteen variables. 
+
+We proceed to outlier rejection for variables humidity, humid temp, incident PAR and reflective PAR. For variable humidity, the range of the value should be between 0 to 100, so we dropped all the values out of range 0 to 100. The distribution of humidity now is multimodal. The histogram for the temperature variable is skewed to the right, and we removed temperature  higher than 35, since the rest of the points are very far away from the center of the histogram. We took a detailed look at the distribution of incident PAR. After the transformation, we still observe some value higher than 2000. Normally we should remove observed values larger than 2500 since they should be identified as outliers. However, the distribution for incident PAR under different locations of trees is quite different.  Incident PARrecorded larger than 2500 come from nodes  placed on the edge of the trees. This implies the location of the node will have an effect on the data reading, thus we didn't treat incident PAR larger than 2500 as outliers.  We identified reflective PAR higher than 150 as outliers since according to the histogram of reflective PAR , those values should be considered as outliers. Furthermore, we believe that we may need to remove values recorded by nodeid 15,122 and 128 because those nodes have lost a huge proportion of data along all result times. The recorded data by the three nodes need to be questioned on accuracy.
+
+## Required Packages
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(ggplot2)
+library("GGally")
+library(gridExtra)
+library(viridis)
+```
+
+## Load Data and sonoma dates file
+
+```{r}
+sonoma_all = read.csv("sonoma-data-all.csv")
+sonoma_net = read.csv("sonoma-data-net.csv")
+sonoma_log = read.csv("sonoma-data-log.csv")
+#we added an additional dataset named time
+#sonoma_data include epoch time and epoch number
+#the new dataset is uploaded together with rmd file
+sonoma_data = read.csv("data/time.csv")
+
+
+myts <- seq.POSIXt(as.POSIXct('2004-04-27 17:10:00'), as.POSIXct('2004-06-11 20:25:00'), by = "5 min")
+sonoma_data['Epoch_time'] <- myts
+```
+
+## Data Cleaning
+
+```{r}
+#change days for in sonoma_log
+#merge changed sonoma_log and sonoma_net datafile
+test <- merge(sonoma_log,sonoma_data,by='epoch')
+test <- test%>%
+  select(names(test)[names(test)!= "result_time"])
+names(test)[length(test)] <- 'result_time'
+resultcolumn <- test['result_time']
+test <- cbind(resultcolumn,test)
+test <- test[,c(-12)]
+
+sonoma_all2 <- rbind(test,sonoma_net)
+```
+
+```{r}
+#convert voltage unit in sonoma_log
+par(mfrow=c(1,2))
+hist(sonoma_net$voltage,main='voltage in net dataset',xlab='voltage')
+hist(sonoma_log$voltage,main='voltage in log dataset',xlab='voltage')
+
+sonoma_net['voltage'] <- 0.6*1024/sonoma_net['voltage']
+```
+
+```{r}
+#convert hamatop and hamabot unit in merged sonoma dataset named "sonoma_all2"
+sonoma_all2$hamatop = sonoma_all2$hamatop/54
+sonoma_all2$hamabot = sonoma_all2$hamabot/54
+```
+
+
+```{r}
+#finding out na's
+#we have missing values for 12532 sensors
+summary(is.na(sonoma_all2))
+#node that lost humidity data also lost other interested variables
+table(sonoma_all2$nodeid[(is.na(sonoma_all2$humidity))==TRUE])
+table(sonoma_all2$voltage[(is.na(sonoma_all2$humidity))==TRUE])
+```
+
+```{r}
+#omit na's from sonoma_all2 dataset
+sonoma_all2 <- na.omit(sonoma_all2)
+```
+
+```{r}
+#merge location file
+#new merged dataset name new_sonoma_all
+#our new dataset now has 15 variables
+location = read.table("data/mote-location-data.txt",header = TRUE, 
+                        stringsAsFactors = FALSE)
+
+names(location)[1] <- "nodeid"
+new_sonoma_all <- merge(sonoma_all2,location, by = "nodeid")
+```
+
+```{r}
+#drop outliers according to voltage
+hist(new_sonoma_all$voltage,main = "Distribution of Voltage", xlab = "Voltage")
+
+new_sonoma_all = (new_sonoma_all%>%filter(voltage <= 3 & voltage >= 2.4))
+```
+
+```{r}
+#humidity
+#hist for humidity before removing outliers
+ggplot(new_sonoma_all,aes(humidity)) + geom_histogram(binwidth =1)
+
+quantile(new_sonoma_all$humidity)
+
+#we find out it is reasonable to identify humidity not in range(0,100) as reasonable
+#hist for humidity after removing outliers
+new_sonoma_all[new_sonoma_all$humidity >= 0 & new_sonoma_all$humidity <= 100,]%>%
+  ggplot(aes(humidity)) + geom_histogram(binwidth = 1)
+
+new_sonoma_all <- new_sonoma_all[new_sonoma_all$humidity >= 0 & new_sonoma_all$humidity <= 100,]
+```
+
+```{r}
+#humid_temp
+#hist for humid_temp before removing outliers
+ggplot(new_sonoma_all,aes(humid_temp)) + geom_histogram()
+
+quantile(new_sonoma_all$humid_temp,na.rm = TRUE)
+
+#first sight remove humid_temp out of range (0,100)
+condition = new_sonoma_all$humid_temp >= 0 & new_sonoma_all$humid_temp<=100
+new_sonoma_all[condition,]%>%
+  ggplot(aes(humid_temp)) + geom_histogram()
+
+quantile(new_sonoma_all[condition,]$humid_temp,na.rm = TRUE)
+
+#more outlier detection, removing humid_temp larger than 35
+new_sonoma_all <- new_sonoma_all[condition,]
+summary(new_sonoma_all$humid_temp)
+new_sonoma_all = new_sonoma_all%>%filter(humid_temp<35)
+hist(new_sonoma_all$humid_temp)
+```
+
+
+```{r}
+#hamatop hist before removing any outliers
+ggplot(new_sonoma_all,aes(hamatop)) + geom_histogram()
+
+quantile(new_sonoma_all$hamatop)
+length(new_sonoma_all$hamatop[new_sonoma_all$hamatop>2000])
+
+#We observed a biomodal distribution for hamatop. We didn't drop any outliers here since it is reasonable to have tails around 2000. 
+```
+
+```{r}
+#hamabot
+#histogram for hamabot before removing outliers
+ggplot(new_sonoma_all,aes(hamabot)) + geom_histogram()
+
+quantile(new_sonoma_all$hamabot,na.rm = TRUE)
+
+#remove hamabot larger than 150
+condition3 = new_sonoma_all$hamabot <= 150
+
+#plot for hamabot after outlier remove
+new_sonoma_all[new_sonoma_all$hamabot < 150,]%>%
+  ggplot(aes(hamabot)) + geom_histogram()
+
+new_sonoma_all <- new_sonoma_all[condition3,]
+```
+
+## Data Exploration & Interesting Findings
+
+Before conducting any meaningful analysis on this dataset, it is important to understand the correlations among variables. In Particular, we focus on variables that will be repeatedly used in further analysis: humidity, height,incident PAR,temperature, and reflective PAR. A pairwise scatter plot is created to demonstrate their correlations over the entire experiment. From Fig 3.1, we observe significant correlation between incident PAR and reflected PAR, and also between temperature and humidity. These two strong correlations can be easily explained by the fact that they are associated in nature. There is no notable correlation among other variables, but it is still possible that some of the correlations are affected by the noises over the entire dataset. We consider two approaches here. First is to aggregate each variable over the entire time span into single observations over days, and replot the scatters, and the result is illustrated by the plot at bottom of Fig 3.1. It is also reasonable to assume that some of the correlations are time-invariant. That is, we can zoom in to a particular day, and the findings could be generalized to the entire dataset. Here we choose 24 hours between 6 am on May 10th to 6am on May 11th. The result is shown by the middle plot of Fig 3.1. As illustrated by Fig 3.1, we can see that both approaches demonstrate more significant correlations among variables. Besides variables that are intrinsically associated, such as humidity and temperature, the in-day correlations plot shows considerable correlations among incident PAR , humidity and temperature, which is not observed in the other two plots over the entire timespan. The plot in the middle of 3.1 shows that height is correlated with humidity, temperature and incident PAR, and hence we have incorporated the differences in height in our later analysis.
+
+Fig 3.2 demonstrates the temporal trend of four variables, humidity, temperature, incident PAR and reflective PAR. In the data cleaning section above, we decide to keep data points with incident PAR value greater than 2000. However, the time series plot reveals that these high values in incident PAR only appear during the first few days of experiment, and hence we remove them in this analysis of temporal trend. We notice that the ranges for different variables are significantly different from each other. While temperature has a relatively narrower range, the other three variables all have large ranges. It is also notable that there is some sudden increment of value in both readings of both incident and reflective PAR. Besides these sudden changes, most of the values for PAR lie within a reasonable range. In nature, humidity and temperature should be continuous with respect to time, and such continuities are reflected in Fig 3.2. For incident and reflective, there are some discontinuous points on plot, and these are probably abnormal readings from sensors.  In addition we can observe a clear periodic temporal pattern in humidity and temperature. Humidity has a clear increasing trend around the beginning of each month , and a roughly symmetric pattern in May. On the other hand, temperature has a decreasing trend at the beginning of each month, and a similarly symmetric pattern within May. It is hard to detect similar temporal trends for incident and reflective PAR. It seems that their values are consistent across the entire experiment. In addition, the coloring of these time series lines reflect a potential time-invariant correlation to heights among all variables, and we will address it in the later session.
+
+Essentially, all data points in our dataset have three dimensions, value, time and height. Value contains readings from all variables of interest including humidity, temperature,incident PAR and reflective PAR. It makes value a high dimensional object that is hard to visualize directly. Principal Component Analysis(PCA) is considered here to reduce dimensionality of value. We incorporate the four variables of interest in PCA, and generate a scree plot based on the result of PCA. Considering the scree plot below, we can see that the first two principal components can explain ovder 75% of the variance in our dataset. It means that we can project our data to lower dimensional objects constructed by the principal components. In particular, since the first two principal components explain the variance in data well, we can represent our data using only two dimensions without losing much information. Datasets with two dimensions are generally easy to visualize, and it facilitates our analysis on distribution of values across different height or time points. 
+
+```{r}
+#unique merged dataset 
+new_sonoma_all <- unique(new_sonoma_all)
+```
+
+```{r}
+#creating ggpairs 
+#selecting variables we are interested in and store them in data 
+data = new_sonoma_all%>%select(humidity,Height,hamatop,humid_temp,hamabot)
+
+new_sonoma_all%>%select(humidity,Height,hamatop,humid_temp,hamabot,result_time)%>%group_by(as.Date(result_time))%>%summarise(humidity = mean(humidity),humid_temp = mean(humid_temp), hamatop = mean(hamatop), hamabot = mean(hamabot),Height = mean(Height))%>%select(humidity,hamatop,humid_temp,hamabot,Height)%>%ggpairs()
+
+#adding variable voltage into ggpairs
+ggpairs(new_sonoma_all%>%select(humidity,humid_temp,Height,hamatop,hamabot,voltage))
+
+```
+
+```{r}
+#select a certain day and redo ggpairs
+#the select time begins at May 10, 2004 at 10 am and the end time is May 11, 2004 at 10 am
+new_sonoma_all%>%filter(result_time >= 	1084183200  & result_time <=  1084269600	)%>%select(humidity,Height,hamatop,humid_temp,hamabot)%>%ggpairs()
+```
+
+```{r}
+#plot variables as time series and consider height as color cues
+#time scale: entire study 
+ggplot(new_sonoma_all,aes(x = result_time, y = humid_temp,color = Height)) + geom_line()
+ggplot(new_sonoma_all,aes(x = result_time, y = humidity,color = Height)) + geom_line()
+ggplot(new_sonoma_all,aes(x = result_time, y = hamatop,color = Height)) + geom_line()
+ggplot(new_sonoma_all,aes(x = result_time, y = hamabot,color = Height)) + geom_line() 
+```
+
+```{r}
+#height as color cue, x-axis as date, plot mean
+p1 = new_sonoma_all%>%group_by(as.Date(result_time),Height)%>%summarise(humidity = mean(humidity), time = as.Date(result_time))%>% ggplot(aes(x = time,y = humidity, col = Height)) + geom_line(aes(group = Height))+ scale_color_viridis(option = "B") + theme_classic()
+
+p2 = new_sonoma_all%>%group_by(as.Date(result_time),Height)%>%summarise(humid_temp = mean(humid_temp), time = as.Date(result_time))%>% ggplot(aes(x = time,y = humid_temp, col = Height)) + geom_line(aes(group = Height))+ scale_color_viridis(option = "B") + theme_classic()
+
+p3 = new_sonoma_all%>%filter(hamatop<2000)%>%group_by(as.Date(result_time),Height)%>%summarise(hamatop = mean(hamatop), time = as.Date(result_time))%>% ggplot(aes(x = time,y = hamatop, col = Height)) + geom_line(aes(group = Height))+ scale_color_viridis(option = "B") + theme_classic()
+
+p4 = new_sonoma_all%>%group_by(as.Date(result_time),Height)%>%summarise(hamabot = mean(hamabot), time = as.Date(result_time))%>% ggplot(aes(x = time,y = hamabot, col = Height))+ geom_line(aes(group = Height))+ scale_color_viridis(option = "B") + theme_classic()
+
+grid.arrange(p1, p2,p3,p4,nrow = 2)
+```
+
+
+
+```{r pca}
+#select interested variables
+selected_cols = new_sonoma_all%>%select(humidity,humid_temp,hamatop,hamabot)
+
+#perform pca
+pca = prcomp(selected_cols, center = T,scale. = T)
+eigen_vals = pca$sdev**2
+
+#scree plot
+qplot(c(1:4), eigen_vals/sum(eigen_vals)) + 
+  geom_line() + 
+  xlab("Principal Component") + 
+  ylab("Variance Explained") +
+  ggtitle("Scree Plot") +
+  ylim(0, 1)
+```
+
+```{r}
+set.seed(521)
+#extract loading
+pc1 = pca$x[,1]
+pc2 = pca$x[,2]
+df = data.frame(pc1)
+df["pc2"] = pc2
+
+#perform k means k=4
+df["Height"] = new_sonoma_all$Height
+kmeans = kmeans(df%>%select(pc1,pc2,Height),4)
+df["label"] = kmeans$cluster
+df%>%ggplot(aes(x = pc1,y = pc2,col = label)) + geom_point(alpha =0.5)
+```
+
+## Interesting Findings
+PCA allows us to create new representations of relationships between values of different variables and height. In our previous example, we plot each variable with respect to time and put height as color key. We observed a clear stratification of data with respect to height in our four time series plot. Using PCA, we are able to demonstrate such a trend in a single plot. Labeling points on PCA plots reveals notable differences among data points with different heights. We can see that points with lower heights lie at the top right part of the graph, while points with higher values on heights at bottom left corner. There is also a clear trend from darker color, which represents lower value in heights, to lighter color. This is a more intuitive way to demonstrate how data points behave under different heights. Furthermore, the PCA algorithm here excludes the time variable. It echoes with the finding above that pattern in values seems to be  time-invariant. Although PCA forbids us from obtaining direct relationships between height and any particular variable, it provides an aggregated perspective on all the predictors. 
+
+Given the context of this problem, it is natural to suspect that data is generated through a mixture of underlying distributions, and if so, it is of importance to understand relationships among these distributions. They may be distributed along the time-axis , height axis, or lie within the domain of values. One may suspect that underlying distribution changes with respect to time, and , that is , we can cluster our data into smaller spans of time. The combination of PCA and Kmeans allows us to validate such hypotheses. In earlier sections, we have generated time series plots for each variable. It is convenient to replace them by the first two principal components, and each is labeled by Kmeans algorithm with K = 2. These new plots demonstrate that Kmeans algorithm is slicing our dataset along the time-axis. It can be interpreted that it is not distinguishing data points that are far away along the time-axis, but instead clustering them based on values from variables incorporated in PCA. It aligns with the temporal pattern we observe in Fig 3.2 as well. 
+
+An alternative view may state that data points from different heights are systematically different from each other. Under clustering perspective, it is equivalent to claim that data points in the same cluster generally share similar height values. In the earlier section, PCA plots show a clear pattern with respect to height. While points are colored by heights in the previous plot, we can instead color them by labels gendered by Kmeans with K = 4. The intuition here is that distribution of data in high position is different from that in low position. Fig 4.3 shows a comparison of the first two principal component plots with different color cues. The plot at left is colored by labels generated by Kmeans, and the left at right colored by height. In fact, the labeling from Kmeans matches the pattern in heights. That is, height is highly correlated with assignment of data in the clustering process. It supports the claim that data points from different heights may not be from the same distribution. Notably, this finding also aligns with the pattern from time series plots in Fig 3.2, where we observe a clear clustering of data based on height. Plotting the principal component here provides a better illustration of such a pattern here. 
+
+## Graph Critique in the paper
+Generally speaking, this paper by Tolle et al provided a holistic overview of the experiment process and collected data along with many of the visualizations. However, we want to argue that messages conveyed by some of these plots are vague and somewhat less intuitive. Here we present some critiques and comments for figure 3[a], 3[c], 3[d], 4 and 7.
+
+The histogram of incident and reflected PAR indicates each of them contain large proportions of 0’s and a long tail, and the scaling makes it difficult to observe patterns on the tail regions. We used log transform on both incident and reflective PAR to show the hidden right tail values. After log transform, zero values will be excluded from the plot, and it will not affect the over scale of the histogram. It provides a zoom-in view on the tail regions.
+
+
+```{r}
+#log transform on hamatop and hamabot
+log_hamatop_hist = new_sonoma_all%>%ggplot(aes(log(hamatop))) + geom_histogram(aes(y = (..count..)/sum(..count..)))+ylab('proportion')
+log_hamabot_hist = new_sonoma_all%>%ggplot(aes(log(hamabot))) + geom_histogram(aes(y = (..count..)/sum(..count..)))+ylab('proportion')
+
+grid.arrange(log_hamatop_hist,log_hamabot_hist)
+```
+
+The paper’s figure 3(c) and 3(d) include box plots that have height as group variable, and “temperature, humidity, reflected PAR and incident PAR” as variables of interest. The key message figure 3(c) and 3(d) meant to convey is that the distribution of all four variables vary at different heights. In the paper, it was demonstrated by boxplots with respect to height. However, even though it indicates the difference in distribution, it does not convey a clear message on the overall trend of these distributions with respect to height. If we treat height as a categorical variable, we will have 27 groups, in other words 27 boxplots on the same graph. With that large number of groups, it is hard to identify numerical variables distribution differences among heights. Even though the paper includes boxplots that visualize the differences from the interested variables’ mean in different height groups, it is still hard to read information from the graph. 
+We calculated variance in different numerical variables group by height, and then plot the trend. Although the variance change inside variable temperature and humidity is not very clear, the variance change on incident PAR and reflective PAR inside different height groups stands out with generally lower variance at lower position. Figure 5.2 can also serve as a supplementary part for the boxplot in figure 3(d).
+
+
+
+```{r}
+#in group variance plot for part b in graph critique
+humid_v = new_sonoma_all%>%select(Height,humidity)%>%group_by(Height)%>%summarise(variance = var(humidity))%>%ggplot(aes(y = variance,x = Height))+ylab('variance in humidity')+geom_line() 
+
+top_v = new_sonoma_all%>%select(Height,hamatop)%>%group_by(Height)%>%summarise(variance = var(hamatop))%>%ggplot(aes(y = variance,x = Height))+geom_line()+ylab('variance in hamatop')
+
+bot_v = new_sonoma_all%>%select(Height,hamabot)%>%group_by(Height)%>%summarise(variance = var(hamabot))%>%ggplot(aes(y = variance,x = Height))+geom_line()+ylab('variance in hamabot')
+
+temp_v = new_sonoma_all%>%select(Height,humid_temp)%>%group_by(Height)%>%summarise(variance = var(humid_temp))%>%ggplot(aes(y = variance,x = Height))+geom_line() +ylab('variance in humid_temp')
+
+grid.arrange(temp_v,humid_v,top_v,bot_v, ncol = 2,top="Variance for Numerical Variables by Heights")
+```
+
+Figure 4 in the paper selected a certain day May 1, 2014 and plot humidity and          temperature collected by all nodes. We believe that each color represents data collected by one node. The inserted vertical blue line represents a sudden drop in humidity. The blue line also appears on the other three graphs, and it seems like this unusual read for humidity from all nodes at the time point is irrelevant with temperature, incident PAR and reflective PAR. The readability from graphs that plot all nodes as different colors remain questionable. The color for each node becomes meaningless if we can’t identify which color represents which node. Setting colors to the same can still tell the overall trend. Creating an animated visualization can improve this figure by enabling visualizing the one node and uncolor the others. The two graphs on the left also confuse people on colors. The different colors on the triangle point seem to represent the opposite direction but the meaning behind triangles’ colors is not clearly stated, so a recommendation can be adding a legend to state the color for triangles. 
+
+Figure 7 in the paper visualizes performance for data recorded by network and data   recorded by log. The figure conveys the information that neither deployment performs perfectly. The network method has lost data for a period length of two weeks as well as the last week of the study. The log method’s nodes stopped reading at different timestamps because logs filled up at different times. For the first columns of figure 7, it may be more clear if we can overlay two histograms and use different colors to represent network and log data yield percentage. The third column of figure 7 has a scatter plot to show the percentage of reading at different heights. Switching x-axis and y-axis may be more helpful to visualize that heights and data yield rate are independent from each other. 
+
+
+## Citation 
+Apogee Instruments, Inc. “Conversion - Ppfd to Lux.” www.apogeeinstruments/com/conversion-ppfd-to-lux/. Accessed 23 09 2021.
+
+Crossbow Technology, Inc. “MPR/MIB User's Manual.” www-db.ics.uci.edu/pages/research/quasar/MPR-MIB%20Series%20User%20Manual%207430-0021-06_A.pdf, 2004. Accessed 23 09 2021.
+
+Tolle, Gilman et al. “A Macroscope in the Redwoods.” Proceedings of the 3rd International Conference on Embedded Networked Sensor Systems - SenSys, 2005, 10.1145/1098918.1098925.
